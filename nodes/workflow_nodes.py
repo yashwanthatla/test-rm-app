@@ -15,6 +15,7 @@ from langgraph.graph import END
 from datetime import datetime, timedelta
 import json
 from dotenv import load_dotenv
+from data.sample_data import news_query,asset_with_subtypes,SAMPLE_ASSET_DATA,analyze_news_prompt
 
 load_dotenv()
 today = datetime.now()
@@ -26,9 +27,10 @@ class WorkflowNodes:
     def fetch_news(state: GraphState) -> GraphState:
         """Fetch relevant financial news."""
         try:
-            news = NewsTools.search_news("latest financial news about Gold Apple stocks market")
-            state.news_data = news
+            news = NewsTools.search_news(news_query)
+            print('NEWS',news)
             state.current_stage = "analyze_news"
+            state.news_data = news
             return state
         except Exception as e:
             state.error = str(e)
@@ -39,65 +41,12 @@ class WorkflowNodes:
         """Analyze news using the agent."""
         print("started analyzing")
         agent = AnalysisAgent().create_agent()
-        prompt = """You are an expert financial analysis agent specializing in real-time market analysis. Your task is to thoroughly analyze the provided news about financial markets, focusing on the most recent data. 
-
-OBJECTIVE:
-Analyze the provided news focusing on Gold and Apple Inc. Look for:
-- Price movements
-- Market sentiment
-- Key events or announcements
-- Trading volumes
-- Market trends
-- Expert opinions
-- Future predictions
-
-INSTRUCTIONS:
-1. Carefully read and analyze the news provided in the input
-2. Use the search tool to gather additional recent information if needed
-3. Focus on data from the most recent trading day
-4. Identify clear positive/negative signals
-5. Determine market sentiment and confidence based on multiple data points
-
-Return results in the following JSON format:
-{{
-    "type": "asset_class|security_name",  // Must be either 'asset_class' or 'security_name'
-    "name": "asset or security name",     // Must be either 'Gold' or 'Apple Inc'
-    "analysis": "positive|negative|neutral", // Based on recent price movements and sentiment
-    "confidence": 0.9,  // Provide actual number between 0 and 1
-    "reasoning": "Brief explanation of your analysis",  // NEW: Add reasoning
-    "latest_data": {{   // NEW: Add key metrics
-        "price": "current price if available",
-        "change_percentage": "daily change if available",
-        "trading_volume": "if available",
-        "key_events": ["list", "of", "recent", "events"]
-    }},
-    "date_analyzed": "analysis date"  // NEW: Add date
-}}
-
-Available Assets for Analysis:
-1. Gold (asset_class)
-   - Track spot prices
-   - Monitor global demand
-   - Consider geopolitical impacts
-
-2. Apple Inc (security_name)
-   - Stock performance
-   - Trading volumes
-   - Company announcements
-   - Market sentiment
-
-IMPORTANT:
-- Use the search tool extensively to gather very recent data
-- Make multiple searches if needed to confirm trends
-- Focus on news from the last 24 hours
-- Cross-reference multiple sources
-- Consider both technical and fundamental factors
-- Provide high confidence ratings only when supported by multiple data points
-
-Please analyze the NEWS provided in the input field and provide comprehensive analysis for both Gold and Apple Inc."""
-        print(prompt,"PROMPT")
-        result = agent.invoke({"input": state.news_data, "chat_history":prompt})
-        analysis_results = json.loads(result['output'])
+        result = agent.invoke({"input": analyze_news_prompt, "chat_history":state.news_data})
+        json_str = result['output']
+        json_str = json_str.replace('```', '')
+        json_str = json_str.strip()
+        print('JSON STRING',json_str)
+        analysis_results = json.loads(json_str)
         state.analysis_results = analysis_results if isinstance(analysis_results, list) else [analysis_results]
         state.current_stage = "search_vectorstore"
         return state
@@ -113,8 +62,11 @@ Please analyze the NEWS provided in the input field and provide comprehensive an
             for result in state.analysis_results:
                 query = f"{result['type']} {result['name']}"
                 docs = vector_store.search(query)
-                search_results[result['name']] = [doc.page_content for doc in docs]
-            
+                search_results[result['name']] = [json.loads(doc.page_content) for doc in docs]
+                search_results['analysis'] = result['analysis']
+                search_results['reasoning'] = result['reasoning']
+                search_results['key_events'] = result['key_events']
+                search_results['date_analyzed'] = result['date_analyzed']
             state.vector_search_results = search_results
             state.current_stage =  END
             return state

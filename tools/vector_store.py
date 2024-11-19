@@ -2,6 +2,7 @@
 import sys
 import os
 from pathlib import Path
+import shutil
 
 current_dir = Path(__file__).resolve().parent
 parent_dir = current_dir.parent
@@ -24,31 +25,27 @@ class VectorStoreManager:
         self.embeddings = OpenAIEmbeddings()
         self.collections = {
             "asset_class": "asset_classes",
-            "security_name": "securities",
-            "sub_class": "sub_classes"
+            "asset_sub_class": "sub_classes"
         }
+    
+    def reset_vectorstore(self):
+        """Delete all existing collections and their data."""
+        if self.store_path.exists():
+            shutil.rmtree(self.store_path)
+        self.store_path.mkdir(parents=True, exist_ok=True)
     
     def _get_collection_data(self) -> Dict[str, List[Dict]]:
         """Organize sample data by collection type."""
         collections_data = {
             "asset_class": [],
-            "security_name": [],
-            "sub_class": []
+            "asset_sub_class": [],  # Changed from sub_class to match data
         }
         
         for item in SAMPLE_ASSET_DATA:
-            if item["type"] == "asset_class":
-                collections_data["asset_class"].append(item)
-                # Add sub-classes if they exist
-                if "sub_classes" in item:
-                    for sub_class in item["sub_classes"]:
-                        collections_data["sub_class"].append({
-                            "name": sub_class,
-                            "parent": item["name"],
-                            "type": "sub_class"
-                        })
-            elif item["type"] == "security_name":
-                collections_data["security_name"].append(item)
+            item_type = item["type"]
+            if item_type in collections_data:
+                collections_data[item_type].append(item)
+        print("collection_data",collections_data)
         
         return collections_data
 
@@ -58,9 +55,11 @@ class VectorStoreManager:
         data_by_collection = self._get_collection_data()
         
         for collection_type, collection_name in self.collections.items():
+            # print("collection type",collection_type,"collection_name",collection_name)
             texts = [json.dumps(item) for item in data_by_collection[collection_type]]
+            # print('vector store text',texts)
             metadatas = [{"type": collection_type} for _ in texts]
-            
+            # print("metadata",metadatas)
             collections[collection_type] = Chroma.from_texts(
                 texts=texts,
                 metadatas=metadatas,
@@ -71,25 +70,50 @@ class VectorStoreManager:
         
         return collections
     
-    def search(self, query: str, k: int = 4):
+    def search(self, query: str, min_confidence: float = 0.75):
         """Search the appropriate Chroma collection based on query type."""
+        self.reset_vectorstore()
         collections = self.init_vectorstore()  # In production, load existing collections
+    # Maximum results to fetch initially - make it larger to ensure we have enough results to filter
+        k = 20  
+        
+        def get_filtered_results(collection):
+            # Get results with scores
+            results_with_scores = collection.similarity_search_with_relevance_scores(query, k=k)
+            print(results_with_scores," result with scores for query ",query)
+            
+            # Filter results based on confidence threshold and convert scores to percentage
+            filtered_results = []
+            for doc, score in results_with_scores:
+                # Convert similarity score to percentage (scores are typically between -1 and 1)
+                confidence_percentage = (score + 1) / 2  # Normalize to 0-1 range
+                if confidence_percentage >= min_confidence:
+                    filtered_results.append(doc)
+            
+            return filtered_results
         
         # Determine which collection to search based on the query
-        if "asset_class" in query.lower():
-            collection = collections["asset_class"]
-        elif "security" in query.lower():
-            collection = collections["security_name"]
-        elif "sub_class" in query.lower():
-            collection = collections["sub_class"]
+        query_lower = query.lower()
+        if "asset_class" in query_lower:
+            collection = collections.get("asset_class")
+            return get_filtered_results(collection) if collection else []
+        
+        elif "security" in query_lower:
+            collection = collections.get("security_name")
+            return get_filtered_results(collection) if collection else []
+        
+        elif "asset_sub_class" in query_lower:
+            collection = collections.get("asset_sub_class")
+            return get_filtered_results(collection) if collection else []
+        
         else:
             # Search all collections and combine results
             all_results = []
             for collection in collections.values():
-                all_results.extend(collection.similarity_search(query, k=k))
+                if collection:  # Only search if collection exists
+                    filtered_docs = get_filtered_results(collection)
+                    all_results.extend(filtered_docs)
             return all_results
-        
-        return collection.similarity_search(query, k=k)
     
     def initialize_with_sample_data(self):
         """Initialize and persist the vector store with sample data."""
@@ -109,6 +133,10 @@ class VectorStoreManager:
 # Usage example:
 if __name__ == "__main__":
     # Initialize vector store with sample data
+    
     vector_store = VectorStoreManager()
+    print("Resetting vector store...")
+    vector_store.reset_vectorstore()
+    print("Initializing with sample data")
     vector_store.initialize_with_sample_data()
     print("Vector store initialized with sample data!")
