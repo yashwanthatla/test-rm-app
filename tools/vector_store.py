@@ -31,9 +31,36 @@ class VectorStoreManager:
     
     def reset_vectorstore(self):
         """Delete all existing collections and their data."""
+        if self._initialized_collections:
+            for collection in self._initialized_collections.values():
+                if hasattr(collection, '_client'):
+                    collection._client.close()
+            self._initialized_collections = None
+
         if self.store_path.exists():
             shutil.rmtree(self.store_path)
         self.store_path.mkdir(parents=True, exist_ok=True)
+    
+    def _load_collections(self):
+        """Load existing collections if they exist."""
+        print("loading collection")
+        print("current working directory",os.getcwd())
+        print(self.store_path,"current path")
+        if not self.store_path.exists():
+            print('returning false')
+            return False
+        
+        collections = {}
+        for collection_type, collection_name in self.collections.items():
+            collection_path = self.store_path / collection_name
+            if collection_path.exists():
+                collections[collection_type] = Chroma(
+                    embedding_function=self.embeddings,
+                    collection_name=collection_name,
+                    persist_directory=str(collection_path)
+                )
+        self._initialized_collections = collections if collections else None
+        print(self._initialized_collections,"intialized collections")
     
     def _get_collection_data(self) -> Dict[str, List[Dict]]:
         """Organize sample data by collection type."""
@@ -74,7 +101,8 @@ class VectorStoreManager:
     
     def search(self, query: str, min_confidence: float = 0.85):
         """Search the appropriate Chroma collection based on query type."""
-        if self._initialized_collections is None:
+        self._initialized_collections = self._load_collections()
+        if not self._initialized_collections:
             collections = self.init_vectorstore()
         else:
             collections = self._initialized_collections
@@ -82,8 +110,8 @@ class VectorStoreManager:
         
         def get_filtered_results(collection):
             # Get results with scores
-            results_with_scores = collection.similarity_search_with_relevance_scores(query, k=k)
-            print(results_with_scores," result with scores for query ",query)
+            results_with_scores = collection.similarity_search_with_relevance_scores(query["name"], k=k)
+            print(results_with_scores," result with scores for query ",query["name"])
             # Filter results based on confidence threshold and convert scores to percentage
             filtered_results = []
             for doc, score in results_with_scores:
@@ -95,7 +123,7 @@ class VectorStoreManager:
             return filtered_results
         
         # Determine which collection to search based on the query
-        query_lower = query.lower()
+        query_lower = query["type"]
         if "asset_class" in query_lower:
             collection = collections.get("asset_class")
             return get_filtered_results(collection) if collection else []

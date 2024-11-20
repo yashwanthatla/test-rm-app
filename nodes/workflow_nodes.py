@@ -57,16 +57,19 @@ class WorkflowNodes:
         """Search vector store for relevant assets."""
         try:
             vector_store = VectorStoreManager()
-            search_results = {}
+            search_results = []
             
             for result in state.analysis_results:
-                query = f"{result['type']} {result['name']}"
+                query = {"name":result['name'],"type":result['type']}
                 docs = vector_store.search(query)
-                search_results[result['name']] = [json.loads(doc.page_content) for doc in docs]
-                search_results['analysis'] = result['analysis']
-                search_results['reasoning'] = result['reasoning']
-                search_results['key_events'] = result['key_events']
-                search_results['date_analyzed'] = result['date_analyzed']
+                search_result = {}
+                search_result["searched_name"] = result['name']
+                search_result["vector_search_results"] = [json.loads(doc.page_content) for doc in docs]
+                search_result['analysis'] = result['analysis']
+                search_result['reasoning'] = result['reasoning']
+                search_result['key_events'] = result['key_events']
+                search_result['date_analyzed'] = result['date_analyzed']
+                search_results.append(search_result)
             state.vector_search_results = search_results
             state.current_stage =  END
             return state
