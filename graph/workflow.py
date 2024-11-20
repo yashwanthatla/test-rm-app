@@ -24,11 +24,15 @@ class NewsAnalysisWorkflow:
         workflow.add_node("fetch_news", WorkflowNodes.fetch_news)
         workflow.add_node("analyze_news", WorkflowNodes.analyze_news)
         workflow.add_node("search_vectorstore", WorkflowNodes.search_vectorstore)
+        workflow.add_node("refine_result", WorkflowNodes.refine_result)
         
         # Add edges
         workflow.add_edge("fetch_news", "analyze_news")
         workflow.add_edge("analyze_news", "search_vectorstore")
+        workflow.add_edge("search_vectorstore", "refine_result")
         
+        
+
         # Set entry point
         workflow.set_entry_point("fetch_news")
         

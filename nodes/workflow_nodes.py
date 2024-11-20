@@ -16,6 +16,8 @@ from datetime import datetime, timedelta
 import json
 from dotenv import load_dotenv
 from data.sample_data import news_query,asset_with_subtypes,SAMPLE_ASSET_DATA,analyze_news_prompt
+from langchain_openai import ChatOpenAI
+from config.settings import Settings
 
 load_dotenv()
 today = datetime.now()
@@ -28,7 +30,7 @@ class WorkflowNodes:
         """Fetch relevant financial news."""
         try:
             news = NewsTools.search_news(news_query)
-            print('NEWS',news)
+            print("NEWS", news)
             state.current_stage = "analyze_news"
             state.news_data = news
             return state
@@ -41,13 +43,19 @@ class WorkflowNodes:
         """Analyze news using the agent."""
         print("started analyzing")
         agent = AnalysisAgent().create_agent()
-        result = agent.invoke({"input": analyze_news_prompt, "chat_history":state.news_data})
-        json_str = result['output']
-        json_str = json_str.replace('```', '')
+        result = agent.invoke(
+            {"input": analyze_news_prompt, "chat_history": state.news_data}
+        )
+        json_str = result["output"]
+        json_str = json_str.replace("```", "")
         json_str = json_str.strip()
-        print('JSON STRING',json_str)
+        print("JSON STRING", json_str)
         analysis_results = json.loads(json_str)
-        state.analysis_results = analysis_results if isinstance(analysis_results, list) else [analysis_results]
+        state.analysis_results = (
+            analysis_results
+            if isinstance(analysis_results, list)
+            else [analysis_results]
+        )
         state.current_stage = "search_vectorstore"
         return state
 
@@ -71,8 +79,98 @@ class WorkflowNodes:
                 search_result['date_analyzed'] = result['date_analyzed']
                 search_results.append(search_result)
             state.vector_search_results = search_results
-            state.current_stage =  END
+            state.current_stage =  'refine_result'
             return state
         except Exception as e:
             state.error = str(e)
             return state
+
+    @staticmethod
+    def refine_result(state: GraphState) -> GraphState:
+        """Refine the results from the vector store using LLM."""
+        print("filtering vector store")
+        
+        print("filtering vector store")
+        llm = ChatOpenAI(**Settings.get_model_kwargs())
+
+        # # Convert the complex nested structure to a clean, deduplicated format
+        # def process_asset_classes(asset_dict):
+        #     processed_results = []
+        #     seen = set()
+
+        #     print("asset dict", asset_dict)
+        #     # Process each asset class category
+        #     for category, items in asset_dict.items():
+        #         if category in [
+        #             "analysis",
+        #             "reasoning",
+        #             "key_events",
+        #             "date_analyzed",
+        #         ]:
+        #             continue
+
+        #         for item in items:
+        #             # Create a unique key based on name and description
+        #             key = (item["name"], item["description"])
+
+        #             # Avoid duplicates
+        #             if key not in seen:
+        #                 processed_item = {
+        #                     "name": item["name"],
+        #                     "type": item["type"],
+        #                     "description": item["description"],
+        #                     "category": category,
+        #                 }
+        #                 processed_results.append(processed_item)
+        #                 seen.add(key)
+
+        #     return processed_results
+
+        # # Process the vector search results
+        # processed_vector_results = process_asset_classes(
+        #     state.vector_search_results
+        # )
+
+        print("vector_search_results2", state.vector_search_results)
+        refinement_prompt = f"""
+        You are a financial analysis assistant. Refine the following processed vector store results:
+
+        Processed Results:
+        {json.dumps(state.vector_search_results, indent=2)}
+
+        Task:
+        - Review and consolidate the processed results
+        - Remove any remaining duplicates
+        - Enhance descriptions if they are too generic
+        - Add analysis sentiment and confidence for each asset class
+        - Ensure JSON follows this exact schema:
+        [
+            {{
+                "name": "asset or security name",
+                "type": "asset_class|asset_sub_class",
+                "description": "detailed description of the asset",
+                "category": "parent category (e.g., Equities, Gold, Fixed Income)",
+                "analysis": "positive|negative|neutral",
+                "confidence": "float between 0 and 1",
+                "reasoning": "short explanation about the analysis"
+            }},
+            ...
+        ]
+
+        Provide a concise, precise, and non-redundant output. Ensure the JSON is valid and follows the schema exactly.
+        """
+
+        # Get refined results from LLM
+        refined_results = llm.predict(refinement_prompt)
+        print("Refined results", refined_results)
+        # Parse and validate the results
+        parsed_results = json.loads(refined_results)
+
+        print("parsed_results", parsed_results)
+        if not isinstance(parsed_results, list):
+            raise ValueError("Refined results are not a valid list.")
+
+        # Update the state with refined results
+        state.vector_search_results = parsed_results
+        state.current_stage = END
+        return state
