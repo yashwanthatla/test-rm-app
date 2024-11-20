@@ -27,6 +27,7 @@ class VectorStoreManager:
             "asset_class": "asset_classes",
             "asset_sub_class": "sub_classes"
         }
+        self._initialized_collections = None 
     
     def reset_vectorstore(self):
         """Delete all existing collections and their data."""
@@ -67,21 +68,22 @@ class VectorStoreManager:
                 collection_name=collection_name,
                 persist_directory=str(self.store_path / collection_name)
             )
+        self._initialized_collections = collections
         
         return collections
     
-    def search(self, query: str, min_confidence: float = 0.75):
+    def search(self, query: str, min_confidence: float = 0.85):
         """Search the appropriate Chroma collection based on query type."""
-        self.reset_vectorstore()
-        collections = self.init_vectorstore()  # In production, load existing collections
-    # Maximum results to fetch initially - make it larger to ensure we have enough results to filter
+        if self._initialized_collections is None:
+            collections = self.init_vectorstore()
+        else:
+            collections = self._initialized_collections
         k = 20  
         
         def get_filtered_results(collection):
             # Get results with scores
             results_with_scores = collection.similarity_search_with_relevance_scores(query, k=k)
             print(results_with_scores," result with scores for query ",query)
-            
             # Filter results based on confidence threshold and convert scores to percentage
             filtered_results = []
             for doc, score in results_with_scores:
@@ -114,6 +116,7 @@ class VectorStoreManager:
                     filtered_docs = get_filtered_results(collection)
                     all_results.extend(filtered_docs)
             return all_results
+
     
     def initialize_with_sample_data(self):
         """Initialize and persist the vector store with sample data."""
