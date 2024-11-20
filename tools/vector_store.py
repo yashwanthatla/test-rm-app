@@ -4,8 +4,9 @@ import os
 from pathlib import Path
 import shutil
 
-current_dir = Path(__file__).resolve().parent
+current_dir = Path(__file__).resolve().parent   
 parent_dir = current_dir.parent
+print(parent_dir)
 sys.path.append(str(parent_dir))
 
 from langchain_community.vectorstores import Chroma
@@ -101,10 +102,13 @@ class VectorStoreManager:
     
     def search(self, query: str, min_confidence: float = 0.85):
         """Search the appropriate Chroma collection based on query type."""
-        self._initialized_collections = self._load_collections()
+        self._load_collections()
+        print("initialized collections",self._initialized_collections)
         if not self._initialized_collections:
+            print("did not got the collections")
             collections = self.init_vectorstore()
         else:
+            print("got the collections")
             collections = self._initialized_collections
         k = 20  
         
@@ -150,6 +154,8 @@ class VectorStoreManager:
         """Initialize and persist the vector store with sample data."""
         # Create store directory if it doesn't exist
         self.store_path.mkdir(parents=True, exist_ok=True)
+        print("current working directory",os.getcwd())
+        print("vector db path",self.store_path)
         
         # Initialize collections with sample data
         collections = self.init_vectorstore()
@@ -165,7 +171,7 @@ class VectorStoreManager:
 if __name__ == "__main__":
     # Initialize vector store with sample data
     
-    vector_store = VectorStoreManager()
+    vector_store = VectorStoreManager('../vectorstore')
     print("Resetting vector store...")
     vector_store.reset_vectorstore()
     print("Initializing with sample data")
